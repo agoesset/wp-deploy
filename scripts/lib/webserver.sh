@@ -19,7 +19,12 @@ install_nginx() {
         fi
     fi
 
-    step "Adding NGINX repository..."
+    step \"Adding NGINX repository...\"
+    # Ensure add-apt-repository is available
+    if ! check_command add-apt-repository; then
+        step \"Installing software-properties-common...\"
+        apt_install software-properties-common
+    fi
     add-apt-repository ppa:ondrej/nginx -y
     apt-get update
 
@@ -142,6 +147,11 @@ install_php() {
     fi
 
     step "Adding PHP repository..."
+    # Ensure add-apt-repository is available
+    if ! check_command add-apt-repository; then
+        step "Installing software-properties-common..."
+        apt_install software-properties-common
+    fi
     add-apt-repository ppa:ondrej/php -y
     apt-get update
 
