@@ -214,21 +214,53 @@ backup_file() {
 
 #===============================================================================
 # Check if domain is a subdomain
+# Handles common second-level TLDs like .co.id, .my.id, .or.id, etc.
 # Returns 0 if subdomain, 1 if root domain
 #===============================================================================
 is_subdomain() {
     local domain="$1"
-    # Count dots - if more than 1, it's likely a subdomain
-    # example.com = 1 dot (root domain)
-    # blog.example.com = 2 dots (subdomain)
-    # shop.blog.example.com = 3 dots (sub-subdomain)
-    local dot_count
-    dot_count=$(echo "$domain" | tr -cd '.' | wc -c)
     
-    if [[ $dot_count -gt 1 ]]; then
-        return 0  # Is subdomain
+    # Common second-level TLDs (Indonesia & international)
+    local second_level_tlds="co.id|my.id|or.id|ac.id|go.id|sch.id|net.id|web.id|biz.id|desa.id|ponpes.id|co|com|org|net|gov|edu|ac|sch|go|or|ne|me|biz|info|name|web"
+    
+    # Remove trailing dot if present
+    domain="${domain%.}"
+    
+    # Check if domain matches second-level TLD pattern
+    # example: blog.example.co.id → subdomain (3 parts)
+    # example: example.co.id → root domain (2 parts)
+    
+    local parts
+    IFS='.' read -ra parts <<< "$domain"
+    local part_count=${#parts[@]}
+    
+    # Build TLD from last parts
+    local tld=""
+    local tld_found=false
+    
+    # Check for second-level TLDs (e.g., co.id, my.id, com.au)
+    if [[ $part_count -ge 3 ]]; then
+        local tld_candidate="${parts[-2]}.${parts[-1]}"
+        if [[ "$tld_candidate" =~ ^($second_level_tlds)$ ]]; then
+            tld_found=true
+            # For second-level TLDs:
+            # 3 parts = root domain (example.co.id)
+            # 4+ parts = subdomain (blog.example.co.id)
+            if [[ $part_count -eq 3 ]]; then
+                return 1  # Root domain
+            else
+                return 0  # Subdomain
+            fi
+        fi
+    fi
+    
+    # Standard TLD (.com, .org, .id, etc.)
+    if [[ $part_count -eq 2 ]]; then
+        return 1  # Root domain (example.com)
+    elif [[ $part_count -gt 2 ]]; then
+        return 0  # Subdomain (blog.example.com)
     else
-        return 1  # Is root domain
+        return 1  # Single part, treat as root
     fi
 }
 
