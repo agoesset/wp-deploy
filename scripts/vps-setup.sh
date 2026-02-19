@@ -34,10 +34,15 @@ PHP_VERSION="8.3"
 #===============================================================================
 source "${LIB_DIR}/colors.sh"
 source "${LIB_DIR}/helpers.sh"
+source "${LIB_DIR}/rollback.sh"
 source "${LIB_DIR}/vps-security.sh"
 source "${LIB_DIR}/webserver.sh"
 source "${LIB_DIR}/wordpress.sh"
 source "${LIB_DIR}/caching.sh"
+source "${LIB_DIR}/site-cleanup.sh"
+source "${LIB_DIR}/performance.sh"
+source "${LIB_DIR}/security-enhanced.sh"
+source "${LIB_DIR}/ssh-keys.sh"
 
 #===============================================================================
 # Main Menu Functions
@@ -84,6 +89,12 @@ show_main_menu() {
     echo -e "  ${GREEN}5.${NC} ⏰ Setup Cron"
     echo -e "  ${GREEN}6.${NC} 📦 Full Installation (All of the above)"
     echo ""
+    echo -e "  ${YELLOW}7.${NC} 📋 List WordPress Sites"
+    echo -e "  ${RED}8.${NC} 🗑️  Delete WordPress Site"
+    echo -e "  ${MAGENTA}9.${NC} ⚡ Performance Tuning"
+    echo -e "  ${BLUE}s.${NC} 🛡️  Security Hardening"
+    echo -e "  ${CYAN}k.${NC} 🔑 SSH Key Management"
+    echo ""
     echo -e "  ${YELLOW}i.${NC} ℹ️  System Information"
     echo -e "  ${RED}0.${NC} 🚪 Exit"
     echo ""
@@ -99,7 +110,15 @@ show_security_menu() {
     echo -e "  ${GREEN}2.${NC} Update Software Packages"
     echo -e "  ${GREEN}3.${NC} Install & Configure Firewall (UFW)"
     echo -e "  ${GREEN}4.${NC} Install Fail2ban"
-    echo -e "  ${GREEN}5.${NC} Run All Security Setup"
+    echo -e "  ${GREEN}5.${NC} Run All Basic Security Setup"
+    echo ""
+    echo -e "  ${YELLOW}6.${NC} Harden SSH Configuration"
+    echo -e "  ${YELLOW}7.${NC} Setup Auto Security Updates"
+    echo -e "  ${YELLOW}8.${NC} Configure Fail2ban for WordPress"
+    echo -e "  ${YELLOW}9.${NC} Harden Database Security"
+    echo -e "  ${YELLOW}10.${NC} Run Security Audit"
+    echo ""
+    echo -e "  ${RED}11.${NC} 🛡️  Run ALL Security Hardening"
     echo ""
     echo -e "  ${RED}0.${NC} Back to Main Menu"
     echo ""
@@ -146,7 +165,7 @@ handle_security_menu() {
     while true; do
         show_banner
         show_security_menu
-        read -rp "$(echo -e "${CYAN}Pilih opsi [0-5]: ${NC}")" choice
+        read -rp "$(echo -e "${CYAN}Pilih opsi [0-11]: ${NC}")" choice
 
         case $choice in
             1) setup_timezone ;;
@@ -154,13 +173,19 @@ handle_security_menu() {
             3) install_ufw ;;
             4) install_fail2ban ;;
             5)
-                info "Running all security setup..."
+                info "Running all basic security setup..."
                 setup_timezone
                 update_packages
                 install_ufw
                 install_fail2ban
-                success "All security setup completed!"
+                success "All basic security setup completed!"
                 ;;
+            6) harden_ssh ;;
+            7) setup_auto_updates ;;
+            8) setup_fail2ban_wordpress ;;
+            9) harden_database ;;
+            10) security_audit ;;
+            11) run_all_security_hardening ;;
             0) break ;;
             *) error "Invalid option. Please try again." ;;
         esac
@@ -218,6 +243,13 @@ handle_wordpress_menu() {
     domain=$(input_prompt "Domain name (e.g., example.com)" "")
     if [[ -z "$domain" ]]; then
         error "Domain is required!"
+        return 1
+    fi
+
+    # Validate domain format
+    if ! validate_domain "$domain"; then
+        error "Invalid domain format: ${domain}"
+        error "Domain must be valid (e.g., example.com, sub.example.co.id)"
         return 1
     fi
 
@@ -310,6 +342,146 @@ handle_cron_menu() {
 
     echo ""
     read -rp "Press Enter to continue..."
+}
+
+handle_delete_site_menu() {
+    show_banner
+    echo ""
+    echo -e "${BOLD}🗑️  Delete WordPress Site${NC}"
+    echo -e "${DIM}─────────────────────────────────────────${NC}"
+    echo ""
+    
+    # First show list of sites
+    list_wordpress_sites
+    echo ""
+    
+    # Get site details for deletion
+    local domain username db_name delete_db delete_ssl
+    
+    domain=$(input_prompt "Domain to delete (e.g., example.com)" "")
+    if [[ -z "$domain" ]]; then
+        error "Domain is required!"
+        return 1
+    fi
+    
+    # Try to auto-detect username from NGINX config
+    local detected_user=""
+    local nginx_conf="/etc/nginx/sites-available/${domain}"
+    if [[ -f "$nginx_conf" ]]; then
+        detected_user=$(grep -oP 'fastcgi_pass unix:/run/php/php-\K[^.]+' "$nginx_conf" | head -1)
+    fi
+    
+    if [[ -n "$detected_user" ]]; then
+        info "Detected username: ${detected_user}"
+        username=$(input_prompt "Linux username" "${detected_user}")
+    else
+        username=$(input_prompt "Linux username" "")
+    fi
+    
+    if [[ -z "$username" ]]; then
+        error "Username is required!"
+        return 1
+    fi
+    
+    # Auto-detect database name from user convention
+    local detected_db="${username}_db"
+    db_name=$(input_prompt "Database name" "${detected_db}")
+    
+    # Ask about additional cleanup
+    echo ""
+    echo -e "${YELLOW}Additional cleanup options:${NC}"
+    echo ""
+    
+    if confirm "Delete database and database user?"; then
+        delete_db="true"
+    else
+        delete_db="false"
+        info "Database will be preserved"
+    fi
+    
+    if confirm "Delete SSL certificate?"; then
+        delete_ssl="true"
+    else
+        delete_ssl="false"
+        info "SSL certificate will be preserved"
+    fi
+    
+    # Final confirmation
+    echo ""
+    warning "═══════════════════════════════════════════════════════════"
+    warning "  ⚠️  WARNING: This action is IRREVERSIBLE!"
+    warning "═══════════════════════════════════════════════════════════"
+    echo ""
+    echo -e "  ${RED}The following will be permanently deleted:${NC}"
+    echo -e "    • Linux user: ${CYAN}${username}${NC}"
+    echo -e "    • Home directory: ${CYAN}/home/${username}${NC}"
+    echo -e "    • NGINX configuration: ${CYAN}${domain}${NC}"
+    echo -e "    • PHP-FPM pool: ${CYAN}${username}${NC}"
+    [[ "$delete_db" == "true" ]] && echo -e "    • Database: ${CYAN}${db_name}${NC}"
+    [[ "$delete_ssl" == "true" ]] && echo -e "    • SSL certificate: ${CYAN}${domain}${NC}"
+    echo ""
+    warning "═══════════════════════════════════════════════════════════"
+    echo ""
+    
+    if ! confirm "Are you absolutely sure you want to delete this site?"; then
+        info "Deletion cancelled"
+        return 0
+    fi
+    
+    # Double confirmation for destructive action
+    echo ""
+    warning "Type the domain '${domain}' to confirm deletion:"
+    local confirm_input
+    read -r confirm_input
+    
+    if [[ "$confirm_input" != "$domain" ]]; then
+        error "Confirmation failed. Domain mismatch."
+        info "Deletion cancelled"
+        return 1
+    fi
+    
+    # Proceed with deletion
+    delete_wordpress_site "$domain" "$username" "$db_name" "$delete_db" "$delete_ssl"
+    
+    echo ""
+    read -rp "Press Enter to continue..."
+}
+
+handle_performance_menu() {
+    while true; do
+        show_banner
+        echo ""
+        echo -e "${BOLD}⚡ Performance Tuning${NC}"
+        echo -e "${DIM}─────────────────────────────────────────${NC}"
+        echo ""
+        echo -e "  ${GREEN}1.${NC} 📊 Show Server Resources"
+        echo -e "  ${GREEN}2.${NC} 🔧 Tune NGINX Configuration"
+        echo -e "  ${GREEN}3.${NC} 🐘 Tune PHP-FPM Configuration"
+        echo -e "  ${GREEN}4.${NC} ⚙️  Tune OPCache"
+        echo -e "  ${GREEN}5.${NC} 🚀 Apply All Optimizations"
+        echo ""
+        echo -e "  ${RED}0.${NC} Back to Main Menu"
+        echo ""
+        echo -e "${DIM}─────────────────────────────────────────${NC}"
+        
+        local choice
+        read -rp "$(echo -e "${CYAN}Pilih opsi [0-5]: ${NC}")" choice
+        
+        case $choice in
+            1) show_server_resources ;;
+            2) tune_nginx_performance ;;
+            3) tune_php_fpm ;;
+            4) tune_opcache ;;
+            5) tune_all_performance ;;
+            0) break ;;
+            *) error "Invalid option. Please try again." ;;
+        esac
+        
+        if [[ "$choice" != "0" ]]; then
+            echo ""
+            read -rp "Press Enter to continue..."
+        fi
+    done
 }
 
 show_system_info() {
@@ -436,7 +608,7 @@ main() {
     while true; do
         show_banner
         show_main_menu
-        read -rp "$(echo -e "${CYAN}Pilih opsi [0-6, i]: ${NC}")" choice
+        read -rp "$(echo -e "${CYAN}Pilih opsi [0-9, s, k, i]: ${NC}")" choice
 
         case $choice in
             1) handle_security_menu ;;
@@ -445,6 +617,11 @@ main() {
             4) handle_caching_menu ;;
             5) handle_cron_menu ;;
             6) full_installation ;;
+            7) list_wordpress_sites ;;
+            8) handle_delete_site_menu ;;
+            9) handle_performance_menu ;;
+            s|S) run_all_security_hardening ;;
+            k|K) handle_ssh_key_menu ;;
             i|I) show_system_info ;;
             0)
                 echo ""
