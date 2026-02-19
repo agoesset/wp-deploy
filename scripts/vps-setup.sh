@@ -39,6 +39,7 @@ source "${LIB_DIR}/vps-security.sh"
 source "${LIB_DIR}/webserver.sh"
 source "${LIB_DIR}/wordpress.sh"
 source "${LIB_DIR}/caching.sh"
+source "${LIB_DIR}/site-cleanup.sh"
 
 #===============================================================================
 # Main Menu Functions
@@ -84,6 +85,9 @@ show_main_menu() {
     echo -e "  ${GREEN}4.${NC} 🚀 Setup Caching (Redis & WP Super Cache)"
     echo -e "  ${GREEN}5.${NC} ⏰ Setup Cron"
     echo -e "  ${GREEN}6.${NC} 📦 Full Installation (All of the above)"
+    echo ""
+    echo -e "  ${YELLOW}7.${NC} 📋 List WordPress Sites"
+    echo -e "  ${RED}8.${NC} 🗑️  Delete WordPress Site"
     echo ""
     echo -e "  ${YELLOW}i.${NC} ℹ️  System Information"
     echo -e "  ${RED}0.${NC} 🚪 Exit"
@@ -320,6 +324,109 @@ handle_cron_menu() {
     read -rp "Press Enter to continue..."
 }
 
+handle_delete_site_menu() {
+    show_banner
+    echo ""
+    echo -e "${BOLD}🗑️  Delete WordPress Site${NC}"
+    echo -e "${DIM}─────────────────────────────────────────${NC}"
+    echo ""
+    
+    # First show list of sites
+    list_wordpress_sites
+    echo ""
+    
+    # Get site details for deletion
+    local domain username db_name delete_db delete_ssl
+    
+    domain=$(input_prompt "Domain to delete (e.g., example.com)" "")
+    if [[ -z "$domain" ]]; then
+        error "Domain is required!"
+        return 1
+    fi
+    
+    # Try to auto-detect username from NGINX config
+    local detected_user=""
+    local nginx_conf="/etc/nginx/sites-available/${domain}"
+    if [[ -f "$nginx_conf" ]]; then
+        detected_user=$(grep -oP 'fastcgi_pass unix:/run/php/php-\K[^.]+' "$nginx_conf" | head -1)
+    fi
+    
+    if [[ -n "$detected_user" ]]; then
+        info "Detected username: ${detected_user}"
+        username=$(input_prompt "Linux username" "${detected_user}")
+    else
+        username=$(input_prompt "Linux username" "")
+    fi
+    
+    if [[ -z "$username" ]]; then
+        error "Username is required!"
+        return 1
+    fi
+    
+    # Auto-detect database name from user convention
+    local detected_db="${username}_db"
+    db_name=$(input_prompt "Database name" "${detected_db}")
+    
+    # Ask about additional cleanup
+    echo ""
+    echo -e "${YELLOW}Additional cleanup options:${NC}"
+    echo ""
+    
+    if confirm "Delete database and database user?"; then
+        delete_db="true"
+    else
+        delete_db="false"
+        info "Database will be preserved"
+    fi
+    
+    if confirm "Delete SSL certificate?"; then
+        delete_ssl="true"
+    else
+        delete_ssl="false"
+        info "SSL certificate will be preserved"
+    fi
+    
+    # Final confirmation
+    echo ""
+    warning "═══════════════════════════════════════════════════════════"
+    warning "  ⚠️  WARNING: This action is IRREVERSIBLE!"
+    warning "═══════════════════════════════════════════════════════════"
+    echo ""
+    echo -e "  ${RED}The following will be permanently deleted:${NC}"
+    echo -e "    • Linux user: ${CYAN}${username}${NC}"
+    echo -e "    • Home directory: ${CYAN}/home/${username}${NC}"
+    echo -e "    • NGINX configuration: ${CYAN}${domain}${NC}"
+    echo -e "    • PHP-FPM pool: ${CYAN}${username}${NC}"
+    [[ "$delete_db" == "true" ]] && echo -e "    • Database: ${CYAN}${db_name}${NC}"
+    [[ "$delete_ssl" == "true" ]] && echo -e "    • SSL certificate: ${CYAN}${domain}${NC}"
+    echo ""
+    warning "═══════════════════════════════════════════════════════════"
+    echo ""
+    
+    if ! confirm "Are you absolutely sure you want to delete this site?"; then
+        info "Deletion cancelled"
+        return 0
+    fi
+    
+    # Double confirmation for destructive action
+    echo ""
+    warning "Type the domain '${domain}' to confirm deletion:"
+    local confirm_input
+    read -r confirm_input
+    
+    if [[ "$confirm_input" != "$domain" ]]; then
+        error "Confirmation failed. Domain mismatch."
+        info "Deletion cancelled"
+        return 1
+    fi
+    
+    # Proceed with deletion
+    delete_wordpress_site "$domain" "$username" "$db_name" "$delete_db" "$delete_ssl"
+    
+    echo ""
+    read -rp "Press Enter to continue..."
+}
+
 show_system_info() {
     show_banner
     echo ""
@@ -444,7 +551,7 @@ main() {
     while true; do
         show_banner
         show_main_menu
-        read -rp "$(echo -e "${CYAN}Pilih opsi [0-6, i]: ${NC}")" choice
+        read -rp "$(echo -e "${CYAN}Pilih opsi [0-8, i]: ${NC}")" choice
 
         case $choice in
             1) handle_security_menu ;;
@@ -453,6 +560,8 @@ main() {
             4) handle_caching_menu ;;
             5) handle_cron_menu ;;
             6) full_installation ;;
+            7) list_wordpress_sites ;;
+            8) handle_delete_site_menu ;;
             i|I) show_system_info ;;
             0)
                 echo ""
