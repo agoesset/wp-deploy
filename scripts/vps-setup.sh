@@ -41,6 +41,7 @@ source "${LIB_DIR}/wordpress.sh"
 source "${LIB_DIR}/caching.sh"
 source "${LIB_DIR}/site-cleanup.sh"
 source "${LIB_DIR}/performance.sh"
+source "${LIB_DIR}/security-enhanced.sh"
 
 #===============================================================================
 # Main Menu Functions
@@ -90,6 +91,7 @@ show_main_menu() {
     echo -e "  ${YELLOW}7.${NC} 📋 List WordPress Sites"
     echo -e "  ${RED}8.${NC} 🗑️  Delete WordPress Site"
     echo -e "  ${MAGENTA}9.${NC} ⚡ Performance Tuning"
+    echo -e "  ${BLUE}s.${NC} 🛡️  Security Hardening"
     echo ""
     echo -e "  ${YELLOW}i.${NC} ℹ️  System Information"
     echo -e "  ${RED}0.${NC} 🚪 Exit"
@@ -106,7 +108,15 @@ show_security_menu() {
     echo -e "  ${GREEN}2.${NC} Update Software Packages"
     echo -e "  ${GREEN}3.${NC} Install & Configure Firewall (UFW)"
     echo -e "  ${GREEN}4.${NC} Install Fail2ban"
-    echo -e "  ${GREEN}5.${NC} Run All Security Setup"
+    echo -e "  ${GREEN}5.${NC} Run All Basic Security Setup"
+    echo ""
+    echo -e "  ${YELLOW}6.${NC} Harden SSH Configuration"
+    echo -e "  ${YELLOW}7.${NC} Setup Auto Security Updates"
+    echo -e "  ${YELLOW}8.${NC} Configure Fail2ban for WordPress"
+    echo -e "  ${YELLOW}9.${NC} Harden Database Security"
+    echo -e "  ${YELLOW}10.${NC} Run Security Audit"
+    echo ""
+    echo -e "  ${RED}11.${NC} 🛡️  Run ALL Security Hardening"
     echo ""
     echo -e "  ${RED}0.${NC} Back to Main Menu"
     echo ""
@@ -153,7 +163,7 @@ handle_security_menu() {
     while true; do
         show_banner
         show_security_menu
-        read -rp "$(echo -e "${CYAN}Pilih opsi [0-5]: ${NC}")" choice
+        read -rp "$(echo -e "${CYAN}Pilih opsi [0-11]: ${NC}")" choice
 
         case $choice in
             1) setup_timezone ;;
@@ -161,13 +171,19 @@ handle_security_menu() {
             3) install_ufw ;;
             4) install_fail2ban ;;
             5)
-                info "Running all security setup..."
+                info "Running all basic security setup..."
                 setup_timezone
                 update_packages
                 install_ufw
                 install_fail2ban
-                success "All security setup completed!"
+                success "All basic security setup completed!"
                 ;;
+            6) harden_ssh ;;
+            7) setup_auto_updates ;;
+            8) setup_fail2ban_wordpress ;;
+            9) harden_database ;;
+            10) security_audit ;;
+            11) run_all_security_hardening ;;
             0) break ;;
             *) error "Invalid option. Please try again." ;;
         esac
@@ -590,7 +606,7 @@ main() {
     while true; do
         show_banner
         show_main_menu
-        read -rp "$(echo -e "${CYAN}Pilih opsi [0-9, i]: ${NC}")" choice
+        read -rp "$(echo -e "${CYAN}Pilih opsi [0-9, s, i]: ${NC}")" choice
 
         case $choice in
             1) handle_security_menu ;;
@@ -602,6 +618,7 @@ main() {
             7) list_wordpress_sites ;;
             8) handle_delete_site_menu ;;
             9) handle_performance_menu ;;
+            s|S) run_all_security_hardening ;;
             i|I) show_system_info ;;
             0)
                 echo ""
