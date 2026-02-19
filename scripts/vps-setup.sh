@@ -40,6 +40,7 @@ source "${LIB_DIR}/webserver.sh"
 source "${LIB_DIR}/wordpress.sh"
 source "${LIB_DIR}/caching.sh"
 source "${LIB_DIR}/site-cleanup.sh"
+source "${LIB_DIR}/performance.sh"
 
 #===============================================================================
 # Main Menu Functions
@@ -88,6 +89,7 @@ show_main_menu() {
     echo ""
     echo -e "  ${YELLOW}7.${NC} 📋 List WordPress Sites"
     echo -e "  ${RED}8.${NC} 🗑️  Delete WordPress Site"
+    echo -e "  ${MAGENTA}9.${NC} ⚡ Performance Tuning"
     echo ""
     echo -e "  ${YELLOW}i.${NC} ℹ️  System Information"
     echo -e "  ${RED}0.${NC} 🚪 Exit"
@@ -427,6 +429,43 @@ handle_delete_site_menu() {
     read -rp "Press Enter to continue..."
 }
 
+handle_performance_menu() {
+    while true; do
+        show_banner
+        echo ""
+        echo -e "${BOLD}⚡ Performance Tuning${NC}"
+        echo -e "${DIM}─────────────────────────────────────────${NC}"
+        echo ""
+        echo -e "  ${GREEN}1.${NC} 📊 Show Server Resources"
+        echo -e "  ${GREEN}2.${NC} 🔧 Tune NGINX Configuration"
+        echo -e "  ${GREEN}3.${NC} 🐘 Tune PHP-FPM Configuration"
+        echo -e "  ${GREEN}4.${NC} ⚙️  Tune OPCache"
+        echo -e "  ${GREEN}5.${NC} 🚀 Apply All Optimizations"
+        echo ""
+        echo -e "  ${RED}0.${NC} Back to Main Menu"
+        echo ""
+        echo -e "${DIM}─────────────────────────────────────────${NC}"
+        
+        local choice
+        read -rp "$(echo -e "${CYAN}Pilih opsi [0-5]: ${NC}")" choice
+        
+        case $choice in
+            1) show_server_resources ;;
+            2) tune_nginx_performance ;;
+            3) tune_php_fpm ;;
+            4) tune_opcache ;;
+            5) tune_all_performance ;;
+            0) break ;;
+            *) error "Invalid option. Please try again." ;;
+        esac
+        
+        if [[ "$choice" != "0" ]]; then
+            echo ""
+            read -rp "Press Enter to continue..."
+        fi
+    done
+}
+
 show_system_info() {
     show_banner
     echo ""
@@ -551,7 +590,7 @@ main() {
     while true; do
         show_banner
         show_main_menu
-        read -rp "$(echo -e "${CYAN}Pilih opsi [0-8, i]: ${NC}")" choice
+        read -rp "$(echo -e "${CYAN}Pilih opsi [0-9, i]: ${NC}")" choice
 
         case $choice in
             1) handle_security_menu ;;
@@ -562,6 +601,7 @@ main() {
             6) full_installation ;;
             7) list_wordpress_sites ;;
             8) handle_delete_site_menu ;;
+            9) handle_performance_menu ;;
             i|I) show_system_info ;;
             0)
                 echo ""
