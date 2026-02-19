@@ -377,7 +377,7 @@ install_wordpress() {
 }
 
 #===============================================================================
-# Add WordPress Site (Main Function)
+# Add WordPress Site (Main Function) - Enhanced with rollback support
 #===============================================================================
 add_wordpress_site() {
     local domain="$1"
@@ -392,30 +392,79 @@ add_wordpress_site() {
 
     header "Adding WordPress Site: ${domain}"
 
+    # Clear any previous rollback resources
+    clear_rollback_resources
+
+    # Enable rollback on error
+    trap 'rollback_resources' ERR
+
     # Step 1: Create user
-    create_site_user "$username"
+    if create_site_user "$username"; then
+        add_rollback_resource "user" "$username"
+    else
+        error "Failed to create user"
+        return 1
+    fi
 
     # Step 2: Create folders
-    create_site_folders "$username" "$domain"
+    if create_site_folders "$username" "$domain"; then
+        add_rollback_resource "folder" "/home/${username}"
+    else
+        error "Failed to create folders"
+        return 1
+    fi
 
     # Step 3: Create PHP-FPM pool
-    create_phpfpm_pool "$username"
+    local pool_conf="/etc/php/${PHP_VERSION}/fpm/pool.d/${username}.conf"
+    if create_phpfpm_pool "$username"; then
+        add_rollback_resource "phpfpm_pool" "$pool_conf"
+    else
+        error "Failed to create PHP-FPM pool"
+        return 1
+    fi
 
-    # Step 4: Get SSL certificate
+    # Step 4: Get SSL certificate (with DNS check)
     local has_ssl="false"
-    if get_ssl_certificate "$domain"; then
-        has_ssl="true"
+    local server_ip
+    server_ip=$(get_public_ip)
+    
+    if check_dns_resolution "$domain" "$server_ip" 2>/dev/null; then
+        if get_ssl_certificate "$domain"; then
+            has_ssl="true"
+        fi
+    else
+        warning "DNS not properly configured for ${domain}"
+        warning "SSL certificate skipped. Run this later after DNS is configured:"
+        echo "  sudo certbot --nginx certonly -d ${domain}"
     fi
 
     # Step 5: Create NGINX config
-    create_nginx_config "$domain" "$username" "$has_ssl"
+    local nginx_conf="/etc/nginx/sites-available/${domain}"
+    if create_nginx_config "$domain" "$username" "$has_ssl"; then
+        add_rollback_resource "nginx_site" "$nginx_conf"
+    else
+        error "Failed to create NGINX configuration"
+        return 1
+    fi
 
-    # Step 6: Create database
-    create_database "$db_name" "$db_user" "$db_pass"
+    # Step 6: Create database (using safe method)
+    if create_database_safe "$db_name" "$db_user" "$db_pass"; then
+        add_rollback_resource "database" "$db_name"
+    else
+        error "Failed to create database"
+        return 1
+    fi
 
     # Step 7: Install WordPress
-    install_wordpress "$domain" "$username" "$db_name" "$db_user" "$db_pass" \
-                     "$site_title" "$admin_user" "$admin_email" "$admin_pass"
+    if ! install_wordpress "$domain" "$username" "$db_name" "$db_user" "$db_pass" \
+                         "$site_title" "$admin_user" "$admin_email" "$admin_pass"; then
+        error "Failed to install WordPress"
+        return 1
+    fi
+
+    # Success! Clear rollback tracking
+    clear_rollback_resources
+    trap - ERR
 
     # Summary
     echo ""
@@ -428,6 +477,11 @@ add_wordpress_site() {
     echo -e "  ${CYAN}Database:${NC}      ${db_name}"
     echo -e "  ${CYAN}DB User:${NC}       ${db_user}"
     echo -e "  ${CYAN}DB Password:${NC}   ${db_pass}"
+    if [[ "$has_ssl" == "true" ]]; then
+        echo -e "  ${CYAN}SSL:${NC}           ✓ Enabled"
+    else
+        echo -e "  ${CYAN}SSL:${NC}           ✗ Not configured (DNS issue)"
+    fi
     echo ""
     echo -e "  ${CYAN}Admin URL:${NC}     https://www.${domain}/wp-admin"
     echo -e "  ${CYAN}Admin User:${NC}    ${admin_user}"
@@ -435,6 +489,7 @@ add_wordpress_site() {
     echo -e "  ${CYAN}Admin Pass:${NC}    ${admin_pass}"
     echo ""
     warning "Save these credentials securely!"
+    info "Database credentials also saved to: /root/.wp-deploy-credentials/${db_name}.txt"
 }
 
 #===============================================================================

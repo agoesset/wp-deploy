@@ -34,6 +34,7 @@ PHP_VERSION="8.3"
 #===============================================================================
 source "${LIB_DIR}/colors.sh"
 source "${LIB_DIR}/helpers.sh"
+source "${LIB_DIR}/rollback.sh"
 source "${LIB_DIR}/vps-security.sh"
 source "${LIB_DIR}/webserver.sh"
 source "${LIB_DIR}/wordpress.sh"
@@ -218,6 +219,13 @@ handle_wordpress_menu() {
     domain=$(input_prompt "Domain name (e.g., example.com)" "")
     if [[ -z "$domain" ]]; then
         error "Domain is required!"
+        return 1
+    fi
+
+    # Validate domain format
+    if ! validate_domain "$domain"; then
+        error "Invalid domain format: ${domain}"
+        error "Domain must be valid (e.g., example.com, sub.example.co.id)"
         return 1
     fi
 
