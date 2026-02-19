@@ -213,6 +213,26 @@ backup_file() {
 }
 
 #===============================================================================
+# Check if domain is a subdomain
+# Returns 0 if subdomain, 1 if root domain
+#===============================================================================
+is_subdomain() {
+    local domain="$1"
+    # Count dots - if more than 1, it's likely a subdomain
+    # example.com = 1 dot (root domain)
+    # blog.example.com = 2 dots (subdomain)
+    # shop.blog.example.com = 3 dots (sub-subdomain)
+    local dot_count
+    dot_count=$(echo "$domain" | tr -cd '.' | wc -c)
+    
+    if [[ $dot_count -gt 1 ]]; then
+        return 0  # Is subdomain
+    else
+        return 1  # Is root domain
+    fi
+}
+
+#===============================================================================
 # Sanitize string for use as username/database name
 #===============================================================================
 sanitize_name() {

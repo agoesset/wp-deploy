@@ -1,6 +1,6 @@
 #!/bin/bash
 #===============================================================================
-# WordPress Site Setup Functions
+# WordPress Site Setup Functions - Enhanced with Subdomain Support
 #===============================================================================
 
 # PHP Version
@@ -117,8 +117,7 @@ POOL_CONF
 #===============================================================================
 get_ssl_certificate() {
     local domain="$1"
-    local with_www="${2:-true}"
-
+    
     header "Getting SSL Certificate for ${domain}"
 
     warning "Make sure your domain's A record is pointing to this server's IP!"
@@ -127,16 +126,13 @@ get_ssl_certificate() {
 
     if ! confirm "Is the DNS configured correctly?"; then
         warning "Skipping SSL certificate. You can run this later with:"
-        echo "  sudo certbot --nginx certonly -d ${domain} -d www.${domain}"
+        echo "  sudo certbot --nginx certonly -d ${domain}"
         return 1
     fi
 
     step "Requesting SSL certificate from Let's Encrypt..."
     
     local certbot_cmd="certbot --nginx certonly -d ${domain}"
-    if [[ "$with_www" == "true" ]]; then
-        certbot_cmd="${certbot_cmd} -d www.${domain}"
-    fi
 
     if eval "$certbot_cmd"; then
         success "SSL certificate obtained successfully!"
@@ -148,17 +144,23 @@ get_ssl_certificate() {
 }
 
 #===============================================================================
-# Create NGINX Site Configuration
+# Create NGINX Site Configuration (with subdomain support)
 #===============================================================================
 create_nginx_config() {
     local domain="$1"
     local username="$2"
     local with_ssl="${3:-true}"
-    local with_www="${4:-true}"
     
     local site_path="/home/${username}/${domain}"
     local nginx_available="/etc/nginx/sites-available/${domain}"
     local nginx_enabled="/etc/nginx/sites-enabled/${domain}"
+
+    # Detect if subdomain
+    local is_subdomain_domain=false
+    if is_subdomain "$domain"; then
+        is_subdomain_domain=true
+        info "Detected subdomain: ${domain}"
+    fi
 
     header "Creating NGINX Configuration for ${domain}"
 
@@ -172,47 +174,34 @@ create_nginx_config() {
     step "Creating NGINX site configuration..."
 
     if [[ "$with_ssl" == "true" ]]; then
-        # SSL Configuration
-        cat > "$nginx_available" << NGINX_SSL_CONF
-# Redirect HTTP to HTTPS
+        if [[ "$is_subdomain_domain" == "true" ]]; then
+            # SUBDOMAIN: SSL Configuration (no www redirect)
+            cat > "$nginx_available" << 'NGINX_SSL_SUBDOMAIN'
+# Redirect HTTP to HTTPS (subdomain)
 server {
     listen 80;
     listen [::]:80;
 
-    server_name ${domain} www.${domain};
+    server_name DOMAIN_PLACEHOLDER;
 
-    return 301 https://www.${domain}\$request_uri;
+    return 301 https://DOMAIN_PLACEHOLDER$request_uri;
 }
 
-# Redirect non-www HTTPS to www
+# Main server block (subdomain)
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
 
-    server_name ${domain};
+    server_name DOMAIN_PLACEHOLDER;
 
-    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
 
-    return 301 https://www.${domain}\$request_uri;
-}
+    access_log SITE_PATH_PLACEHOLDER/logs/access.log;
+    error_log SITE_PATH_PLACEHOLDER/logs/error.log;
 
-# Main server block
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
-
-    server_name www.${domain};
-
-    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
-
-    access_log ${site_path}/logs/access.log;
-    error_log ${site_path}/logs/error.log;
-
-    root ${site_path}/public/;
+    root SITE_PATH_PLACEHOLDER/public/;
     index index.php;
 
     # Security Headers
@@ -221,13 +210,13 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
 
     location / {
-        try_files \$uri \$uri/ /index.php?\$args;
+        try_files $uri $uri/ /index.php?$args;
     }
 
-    location ~ \.php\$ {
-        try_files \$uri =404;
-        fastcgi_split_path_info ^(.+\.php)(/.+)\$;
-        fastcgi_pass unix:/run/php/php-${username}.sock;
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass unix:/run/php/php-USERNAME_PLACEHOLDER.sock;
         fastcgi_index index.php;
         include fastcgi.conf;
     }
@@ -246,30 +235,118 @@ server {
         deny all;
     }
 }
-NGINX_SSL_CONF
-    else
-        # Non-SSL Configuration (for testing)
-        cat > "$nginx_available" << NGINX_CONF
+NGINX_SSL_SUBDOMAIN
+            # Replace placeholders
+            sed -i "s|DOMAIN_PLACEHOLDER|${domain}|g" "$nginx_available"
+            sed -i "s|SITE_PATH_PLACEHOLDER|${site_path}|g" "$nginx_available"
+            sed -i "s|USERNAME_PLACEHOLDER|${username}|g" "$nginx_available"
+            
+        else
+            # ROOT DOMAIN: SSL Configuration (with www redirect)
+            cat > "$nginx_available" << 'NGINX_SSL_ROOT'
+# Redirect HTTP to HTTPS
 server {
     listen 80;
     listen [::]:80;
 
-    server_name ${domain} www.${domain};
+    server_name DOMAIN_PLACEHOLDER www.DOMAIN_PLACEHOLDER;
 
-    access_log ${site_path}/logs/access.log;
-    error_log ${site_path}/logs/error.log;
+    return 301 https://www.DOMAIN_PLACEHOLDER$request_uri;
+}
 
-    root ${site_path}/public/;
+# Redirect non-www HTTPS to www
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+
+    server_name DOMAIN_PLACEHOLDER;
+
+    ssl_certificate /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
+
+    return 301 https://www.DOMAIN_PLACEHOLDER$request_uri;
+}
+
+# Main server block (www)
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+
+    server_name www.DOMAIN_PLACEHOLDER;
+
+    ssl_certificate /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
+
+    access_log SITE_PATH_PLACEHOLDER/logs/access.log;
+    error_log SITE_PATH_PLACEHOLDER/logs/error.log;
+
+    root SITE_PATH_PLACEHOLDER/public/;
+    index index.php;
+
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass unix:/run/php/php-USERNAME_PLACEHOLDER.sock;
+        fastcgi_index index.php;
+        include fastcgi.conf;
+    }
+
+    # Block xmlrpc.php
+    location = /xmlrpc.php {
+        deny all;
+    }
+
+    # Block access to sensitive files
+    location ~ /\. {
+        deny all;
+    }
+
+    location ~ /wp-config.php {
+        deny all;
+    }
+}
+NGINX_SSL_ROOT
+            # Replace placeholders
+            sed -i "s|DOMAIN_PLACEHOLDER|${domain}|g" "$nginx_available"
+            sed -i "s|SITE_PATH_PLACEHOLDER|${site_path}|g" "$nginx_available"
+            sed -i "s|USERNAME_PLACEHOLDER|${username}|g" "$nginx_available"
+        fi
+    else
+        # Non-SSL Configuration
+        if [[ "$is_subdomain_domain" == "true" ]]; then
+            # SUBDOMAIN: Non-SSL
+            cat > "$nginx_available" << 'NGINX_SUBDOMAIN'
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name DOMAIN_PLACEHOLDER;
+
+    access_log SITE_PATH_PLACEHOLDER/logs/access.log;
+    error_log SITE_PATH_PLACEHOLDER/logs/error.log;
+
+    root SITE_PATH_PLACEHOLDER/public/;
     index index.php;
 
     location / {
-        try_files \$uri \$uri/ /index.php?\$args;
+        try_files $uri $uri/ /index.php?$args;
     }
 
-    location ~ \.php\$ {
-        try_files \$uri =404;
-        fastcgi_split_path_info ^(.+\.php)(/.+)\$;
-        fastcgi_pass unix:/run/php/php-${username}.sock;
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass unix:/run/php/php-USERNAME_PLACEHOLDER.sock;
         fastcgi_index index.php;
         include fastcgi.conf;
     }
@@ -282,7 +359,52 @@ server {
         deny all;
     }
 }
-NGINX_CONF
+NGINX_SUBDOMAIN
+            # Replace placeholders
+            sed -i "s|DOMAIN_PLACEHOLDER|${domain}|g" "$nginx_available"
+            sed -i "s|SITE_PATH_PLACEHOLDER|${site_path}|g" "$nginx_available"
+            sed -i "s|USERNAME_PLACEHOLDER|${username}|g" "$nginx_available"
+        else
+            # ROOT DOMAIN: Non-SSL
+            cat > "$nginx_available" << 'NGINX_ROOT'
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name DOMAIN_PLACEHOLDER www.DOMAIN_PLACEHOLDER;
+
+    access_log SITE_PATH_PLACEHOLDER/logs/access.log;
+    error_log SITE_PATH_PLACEHOLDER/logs/error.log;
+
+    root SITE_PATH_PLACEHOLDER/public/;
+    index index.php;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass unix:/run/php/php-USERNAME_PLACEHOLDER.sock;
+        fastcgi_index index.php;
+        include fastcgi.conf;
+    }
+
+    location = /xmlrpc.php {
+        deny all;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}
+NGINX_ROOT
+            # Replace placeholders
+            sed -i "s|DOMAIN_PLACEHOLDER|${domain}|g" "$nginx_available"
+            sed -i "s|SITE_PATH_PLACEHOLDER|${site_path}|g" "$nginx_available"
+            sed -i "s|USERNAME_PLACEHOLDER|${username}|g" "$nginx_available"
+        fi
     fi
 
     step "Creating symlink to sites-enabled..."
@@ -351,7 +473,12 @@ install_wordpress() {
     local admin_pass="$9"
     
     local site_path="/home/${username}/${domain}/public"
-    local site_url="https://www.${domain}"
+    local site_url="https://${domain}"
+    
+    # Adjust URL for root domains (use www)
+    if ! is_subdomain "$domain"; then
+        site_url="https://www.${domain}"
+    fi
 
     header "Installing WordPress"
 
@@ -483,7 +610,10 @@ add_wordpress_site() {
         echo -e "  ${CYAN}SSL:${NC}           ✗ Not configured (DNS issue)"
     fi
     echo ""
-    echo -e "  ${CYAN}Admin URL:${NC}     https://www.${domain}/wp-admin"
+    echo -e "  ${CYAN}Admin URL:${NC}     https://${domain}/wp-admin"
+    if ! is_subdomain "$domain"; then
+        echo -e "  ${CYAN}Admin URL (www):${NC} https://www.${domain}/wp-admin"
+    fi
     echo -e "  ${CYAN}Admin User:${NC}    ${admin_user}"
     echo -e "  ${CYAN}Admin Email:${NC}   ${admin_email}"
     echo -e "  ${CYAN}Admin Pass:${NC}    ${admin_pass}"
