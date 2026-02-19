@@ -42,6 +42,7 @@ source "${LIB_DIR}/caching.sh"
 source "${LIB_DIR}/site-cleanup.sh"
 source "${LIB_DIR}/performance.sh"
 source "${LIB_DIR}/security-enhanced.sh"
+source "${LIB_DIR}/ssh-keys.sh"
 
 #===============================================================================
 # Main Menu Functions
@@ -92,6 +93,7 @@ show_main_menu() {
     echo -e "  ${RED}8.${NC} 🗑️  Delete WordPress Site"
     echo -e "  ${MAGENTA}9.${NC} ⚡ Performance Tuning"
     echo -e "  ${BLUE}s.${NC} 🛡️  Security Hardening"
+    echo -e "  ${CYAN}k.${NC} 🔑 SSH Key Management"
     echo ""
     echo -e "  ${YELLOW}i.${NC} ℹ️  System Information"
     echo -e "  ${RED}0.${NC} 🚪 Exit"
@@ -606,7 +608,7 @@ main() {
     while true; do
         show_banner
         show_main_menu
-        read -rp "$(echo -e "${CYAN}Pilih opsi [0-9, s, i]: ${NC}")" choice
+        read -rp "$(echo -e "${CYAN}Pilih opsi [0-9, s, k, i]: ${NC}")" choice
 
         case $choice in
             1) handle_security_menu ;;
@@ -619,6 +621,7 @@ main() {
             8) handle_delete_site_menu ;;
             9) handle_performance_menu ;;
             s|S) run_all_security_hardening ;;
+            k|K) handle_ssh_key_menu ;;
             i|I) show_system_info ;;
             0)
                 echo ""
